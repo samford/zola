@@ -1,4 +1,5 @@
 extern crate glob;
+extern crate html_minifier;
 extern crate rayon;
 extern crate serde;
 extern crate tera;
@@ -689,8 +690,12 @@ impl Site {
         create_directory(&current_path)?;
 
         // Finally, create a index.html file there with the page rendered
-        let output = page.render_html(&self.tera, &self.config, &self.library.read().unwrap())?;
-        create_file(&current_path.join("index.html"), &self.inject_livereload(output))?;
+        let mut output = page.render_html(&self.tera, &self.config, &self.library.read().unwrap())?;
+        output = self.inject_livereload(output);
+        if self.config.minify_html {
+            output = html_minifier::minify(output).unwrap();
+        }
+        create_file(&current_path.join("index.html"), &output)?;
 
         // Copy any asset we found previously into the same directory as the index.html
         for asset in &page.assets {
@@ -872,10 +877,12 @@ impl Site {
             }
         }
 
-        create_file(
-            &output_path.join(page_name),
-            &render_redirect_template(&permalink, &self.tera)?,
-        )
+        let mut output = render_redirect_template(&permalink, &self.tera)?;
+        if self.config.minify_html {
+            output = html_minifier::minify(output).unwrap();
+        }
+
+        create_file(&output_path.join(page_name), &output)
     }
 
     pub fn render_aliases(&self) -> Result<()> {
@@ -899,8 +906,12 @@ impl Site {
         ensure_directory_exists(&self.output_path)?;
         let mut context = Context::new();
         context.insert("config", &self.config);
-        let output = render_template("404.html", &self.tera, context, &self.config.theme)?;
-        create_file(&self.output_path.join("404.html"), &self.inject_livereload(output))
+        let mut output = render_template("404.html", &self.tera, context, &self.config.theme)?;
+        output = self.inject_livereload(output);
+        if self.config.minify_html {
+            output = html_minifier::minify(output).unwrap();
+        }
+        create_file(&self.output_path.join("404.html"), &output)
     }
 
     /// Renders robots.txt
@@ -936,10 +947,14 @@ impl Site {
         } else {
             self.output_path.join(&taxonomy.kind.name)
         };
-        let list_output =
+        let mut list_output =
             taxonomy.render_all_terms(&self.tera, &self.config, &self.library.read().unwrap())?;
+        list_output = self.inject_livereload(list_output);
+        if self.config.minify_html {
+            list_output = html_minifier::minify(list_output).unwrap();
+        }
         create_directory(&output_path)?;
-        create_file(&output_path.join("index.html"), &self.inject_livereload(list_output))?;
+        create_file(&output_path.join("index.html"), &list_output)?;
         let library = self.library.read().unwrap();
         taxonomy
             .items
@@ -952,10 +967,14 @@ impl Site {
                         &Paginator::from_taxonomy(&taxonomy, item, &library),
                     )?;
                 } else {
-                    let single_output =
+                    let mut single_output =
                         taxonomy.render_term(item, &self.tera, &self.config, &library)?;
+                    single_output = self.inject_livereload(single_output);
+                    if self.config.minify_html {
+                        single_output = html_minifier::minify(single_output).unwrap();
+                    }
                     create_directory(&path)?;
-                    create_file(&path.join("index.html"), &self.inject_livereload(single_output))?;
+                    create_file(&path.join("index.html"), &single_output)?;
                 }
 
                 if taxonomy.kind.rss {
@@ -1123,10 +1142,11 @@ impl Site {
 
         if let Some(ref redirect_to) = section.meta.redirect_to {
             let permalink = self.config.make_permalink(redirect_to);
-            create_file(
-                &output_path.join("index.html"),
-                &render_redirect_template(&permalink, &self.tera)?,
-            )?;
+            let mut output = render_redirect_template(&permalink, &self.tera)?;
+            if self.config.minify_html {
+                output = html_minifier::minify(output).unwrap();
+            }
+            create_file(&output_path.join("index.html"), &output)?;
             return Ok(());
         }
 
@@ -1136,9 +1156,13 @@ impl Site {
                 &Paginator::from_section(&section, &self.library.read().unwrap()),
             )?;
         } else {
-            let output =
+            let mut output =
                 section.render_html(&self.tera, &self.config, &self.library.read().unwrap())?;
-            create_file(&output_path.join("index.html"), &self.inject_livereload(output))?;
+            output = self.inject_livereload(output);
+            if self.config.minify_html {
+                output = html_minifier::minify(output).unwrap();
+            }
+            create_file(&output_path.join("index.html"), &output)?;
         }
 
         Ok(())
@@ -1192,20 +1216,26 @@ impl Site {
             .map(|pager| {
                 let page_path = folder_path.join(&format!("{}", pager.index));
                 create_directory(&page_path)?;
-                let output = paginator.render_pager(
+                let mut output = paginator.render_pager(
                     pager,
                     &self.config,
                     &self.tera,
                     &self.library.read().unwrap(),
                 )?;
+                output = self.inject_livereload(output);
+                if self.config.minify_html {
+                    output = html_minifier::minify(output).unwrap();
+                }
                 if pager.index > 1 {
-                    create_file(&page_path.join("index.html"), &self.inject_livereload(output))?;
+                    create_file(&page_path.join("index.html"), &output)?;
                 } else {
-                    create_file(&output_path.join("index.html"), &self.inject_livereload(output))?;
-                    create_file(
-                        &page_path.join("index.html"),
-                        &render_redirect_template(&paginator.permalink, &self.tera)?,
-                    )?;
+                    create_file(&output_path.join("index.html"), &output)?;
+                    let mut redirect_output =
+                        render_redirect_template(&paginator.permalink, &self.tera)?;
+                    if self.config.minify_html {
+                        redirect_output = html_minifier::minify(redirect_output).unwrap();
+                    }
+                    create_file(&page_path.join("index.html"), &redirect_output)?;
                 }
                 Ok(())
             })

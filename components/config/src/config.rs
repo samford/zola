@@ -129,6 +129,9 @@ pub struct Config {
     #[serde(skip_serializing, skip_deserializing)] // not a typo, 2 are needed
     pub ignored_content_globset: Option<GlobSet>,
 
+    /// Whether to minify generated HTML files
+    pub minify_html: bool,
+
     /// The mode Zola is currently being ran on. Some logging/feature can differ depending on the
     /// command being used.
     #[serde(skip_serializing)]
@@ -317,6 +320,7 @@ impl Default for Config {
             hard_link_static: false,
             taxonomies: Vec::new(),
             compile_sass: false,
+            minify_html: false,
             mode: Mode::Build,
             build_search_index: false,
             ignored_content: Vec::new(),
