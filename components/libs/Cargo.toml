@@ -37,14 +37,17 @@ slug = "0.1"
 percent-encoding = "2"
 filetime = "0.2"
 minify-html = "0.8"
-reqwest = {version = "0.11", default-features = false, features = ["blocking"]}
+# reqwest = {version = "0.11", default-features = false, features = ["blocking"]}
+ureq = { version = "2.4", default-features = false, features = ["tls", "gzip", "charset"] }
 sass-rs = "0.2"
 relative-path = "1"
 glob = "0.3"
 
 
 [features]
-rust-tls = ["reqwest/rustls-tls"]
-native-tls = ["reqwest/default-tls"]
+# rust-tls = ["reqwest/rustls-tls"]
+rust-tls = []
+# native-tls = ["reqwest/default-tls"]
+native-tls = ["ureq/native-tls"]
 indexing-zh = ["elasticlunr-rs/zh"]
 indexing-ja = ["elasticlunr-rs/ja"]

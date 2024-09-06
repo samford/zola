@@ -3,19 +3,17 @@ use std::result;
 use std::sync::{Arc, RwLock};
 
 use libs::once_cell::sync::Lazy;
-use libs::reqwest::header::{HeaderMap, ACCEPT};
-use libs::reqwest::{blocking::Client, StatusCode};
 
 use config::LinkChecker;
 use errors::anyhow;
 
 use utils::links::has_anchor_id;
 
-pub type Result = result::Result<StatusCode, String>;
+pub type Result = result::Result<u16, String>;
 
 pub fn is_valid(res: &Result) -> bool {
     match res {
-        Ok(ref code) => code.is_success() || *code == StatusCode::NOT_MODIFIED,
+        Ok(ref code) => (*code >= 200 && *code < 300) || *code == 304,
         Err(_) => false,
     }
 }
@@ -39,48 +37,37 @@ pub fn check_url(url: &str, config: &LinkChecker) -> Result {
         }
     }
 
-    let mut headers = HeaderMap::new();
-    headers.insert(ACCEPT, "text/html".parse().unwrap());
-    headers.append(ACCEPT, "*/*".parse().unwrap());
-
-    let client = Client::builder()
-        .user_agent(concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .expect("reqwest client build");
-
     let check_anchor = !config.skip_anchor_prefixes.iter().any(|prefix| url.starts_with(prefix));
 
     // Need to actually do the link checking
-    let res = match client.get(url).headers(headers).send() {
-        Ok(ref mut response) if check_anchor && has_anchor(url) => {
-            let body = {
-                let mut buf: Vec<u8> = vec![];
-                response.copy_to(&mut buf).unwrap();
-                match String::from_utf8(buf) {
-                    Ok(s) => s,
-                    Err(_) => return Err("The page didn't return valid UTF-8".to_string()),
-                }
-            };
-
-            match check_page_for_anchor(url, body) {
-                Ok(_) => Ok(response.status()),
-                Err(e) => Err(e.to_string()),
-            }
-        }
+    let res = match libs::ureq::get(url)
+        .set("Accept", "text/html,*/*")
+        .set("User-Agent", concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")))
+        .call()
+    {
         Ok(response) => {
-            if response.status().is_success() || response.status() == StatusCode::NOT_MODIFIED {
-                Ok(response.status())
+            let response_status = response.status();
+
+            if check_anchor && has_anchor(url) {
+                let body = response.into_string().unwrap();
+
+                return match check_page_for_anchor(url, body) {
+                    Ok(_) => Ok(response_status),
+                    Err(e) => Err(e.to_string()),
+                };
+            }
+
+            if (response_status >= 200 && response_status < 300) || response_status == 304 {
+                Ok(response_status)
             } else {
-                let error_string = if response.status().is_informational() {
-                    format!("Informational status code ({}) received", response.status())
-                } else if response.status().is_redirection() {
-                    format!("Redirection status code ({}) received", response.status())
-                } else if response.status().is_client_error() {
-                    format!("Client error status code ({}) received", response.status())
-                } else if response.status().is_server_error() {
-                    format!("Server error status code ({}) received", response.status())
-                } else {
-                    format!("Non-success status code ({}) received", response.status())
+                let error_string = match response_status {
+                    100..=199 => {
+                        format!("Informational status code ({}) received", response_status)
+                    }
+                    300..=399 => format!("Redirection status code ({}) received", response_status),
+                    400..=499 => format!("Client error status code ({}) received", response_status),
+                    500..=599 => format!("Server error status code ({}) received", response_status),
+                    _ => format!("Non-success status code ({}) received", response_status),
                 };
 
                 Err(error_string)
@@ -119,7 +106,6 @@ mod tests {
     use super::{
         check_page_for_anchor, check_url, has_anchor, is_valid, message, LinkChecker, LINKS,
     };
-    use libs::reqwest::StatusCode;
     use mockito::mock;
 
     // NOTE: HTTP mock paths below are randomly generated to avoid name
@@ -186,7 +172,7 @@ mod tests {
         let url = format!("{}{}", mockito::server_url(), "/C4Szbfnvj6M0LoPk");
         let res = check_url(&url, &LinkChecker::default());
         assert!(is_valid(&res));
-        assert_eq!(res.unwrap(), StatusCode::OK);
+        assert_eq!(res.unwrap(), 200);
     }
 
     #[test]
